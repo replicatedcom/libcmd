@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"reflect"
 	"strings"
 	"time"
@@ -83,13 +84,12 @@ func (c *Cmd) Run(args ...string) (string, error) {
 		return "", err
 	}
 
-	nilTime := time.Time{}
 	for {
-		cntr, err := c.dockerClient.InspectContainer(container.ID)
+		exited, err := containerHasExited(c.dockerClient, container.ID)
 		if err != nil {
 			return "", err
 		}
-		if !cntr.State.FinishedAt.Equal(nilTime) {
+		if exited {
 			break
 		}
 		time.Sleep(time.Millisecond + 100)
@@ -169,6 +169,17 @@ func removeContainer(client *docker.Client, containerId string) error {
 	return nil
 }
 
+func containerHasExited(client *docker.Client, containerId string) (bool, error) {
+	cntr, err := client.InspectContainer(containerId)
+	if err != nil {
+		return false, err
+	}
+	if cntr.State.FinishedAt.IsZero() {
+		return false, nil
+	}
+	return true, nil
+}
+
 func getLogs(client *docker.Client, containerId string) (string, error) {
 	log.Infof("getting container %s logs", containerId)
 	stdout, stderr, _, err := makeRequest("GET", fmt.Sprintf("/containers/%s/logs?follow=0&stderr=1&stdout=1", containerId))
@@ -191,18 +202,27 @@ func makeRequest(method, path string) ([]byte, []byte, int, error) {
 	}
 	req.Header.Set("User-Agent", "go-dockerclient")
 	var resp *http.Response
-	address := "/var/run/docker.sock"
-	dial, err := net.Dial("unix", address)
+	u, err := url.Parse(config.DockerEndpoint)
 	if err != nil {
-		return nil, nil, -1, err
+		return nil, nil, -1, docker.ErrInvalidEndpoint
 	}
-	defer dial.Close()
-	clientconn := httputil.NewClientConn(dial, nil)
-	resp, err = clientconn.Do(req)
-	if err != nil {
-		return nil, nil, -1, err
+	protocol := u.Scheme
+	address := u.Path
+	if protocol == "unix" {
+		dial, err := net.Dial(protocol, address)
+		if err != nil {
+			return nil, nil, -1, err
+		}
+		defer dial.Close()
+		clientconn := httputil.NewClientConn(dial, nil)
+		resp, err = clientconn.Do(req)
+		if err != nil {
+			return nil, nil, -1, err
+		}
+		defer clientconn.Close()
+	} else {
+		resp, err = http.DefaultClient.Do(req)
 	}
-	defer clientconn.Close()
 	if err != nil {
 		if strings.Contains(err.Error(), "connection refused") {
 			return nil, nil, -1, docker.ErrConnectionRefused
