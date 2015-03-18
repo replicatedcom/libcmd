@@ -20,7 +20,8 @@ func main() {
 	log.SetLevel(log.DebugLevel)
 
 	opts := map[string]string{
-		"ContainerRepository": "emosbaugh/cmd",
+		"ContainerRepository": "freighter/cmd",
+		"ContainerTag":        "latest",
 	}
 	libcmd.InitCmdContainer(opts)
 
@@ -29,5 +30,5 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Infof("Command result: %v", results)
+	log.Infof("Command result: %q", results)
 }

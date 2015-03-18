@@ -1,6 +1,7 @@
 package libcmd
 
 import (
+	"encoding/base64"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -39,7 +40,8 @@ func (c *goCertCommand) Run(args ...string) ([]string, error) {
 	}
 	results := strings.SplitAfter(result, "-----END RSA PRIVATE KEY-----")
 	for i, result := range results {
-		results[i] = strings.TrimSpace(result)
+		result := strings.TrimSpace(result)
+		results[i] = base64.StdEncoding.EncodeToString([]byte(result))
 	}
 	return results, nil
 }
