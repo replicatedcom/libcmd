@@ -4,7 +4,7 @@ FROM ubuntu:trusty
 RUN apt-get update && apt-get install -y \
     openssl
 
-ADD ./commands /root/commands
+ADD ./root/commands /root/commands
 
 # Set environment variables.
 ENV HOME /root

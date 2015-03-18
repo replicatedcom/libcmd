@@ -24,11 +24,10 @@ func main() {
 	}
 	libcmd.InitCmdContainer(opts)
 
-	cmd := libcmd.NewCmd(op)
 	log.Infof("Running command \"%s\"", op)
-	result, err := cmd.Run(flag.Args()...)
+	results, err := libcmd.RunCommand(op, flag.Args()...)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Infof("Command result: %+v", result)
+	log.Infof("Command result: %v", results)
 }
