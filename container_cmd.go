@@ -23,6 +23,7 @@ var (
 
 	availableCommands = []string{
 		"cert",
+		"publicip",
 		"random",
 		"raw",
 	}
