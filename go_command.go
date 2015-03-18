@@ -19,6 +19,8 @@ func newGoCommand(op string) (goCommand, error) {
 		return &goCertCommand{}, nil
 	} else if op == "random" {
 		return &goRandCommand{}, nil
+	} else if op == "echo" {
+		return &goEchoCommand{}, nil
 	}
 	return nil, ErrCommandNotFound
 }
@@ -64,4 +66,12 @@ func randSeq(length int) string {
 		b[i] = randCharset[rand.Intn(len(randCharset))]
 	}
 	return string(b)
+}
+
+type goEchoCommand struct {
+}
+
+func (c *goEchoCommand) Run(args ...string) ([]string, error) {
+	result := strings.Join(args, " ")
+	return []string{result}, nil
 }
