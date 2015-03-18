@@ -45,9 +45,9 @@ func InitCmdContainer(opts map[string]string) {
 		log.Fatal(err)
 	}
 	globalDockerClient = client
-	//if err := pullImage(globalDockerClient, config.ContainerRepository, config.ContainerTag); err != nil {
-	//	log.Fatal(err)
-	//}
+	if err := pullImage(globalDockerClient, config.ContainerRepository, config.ContainerTag); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func RunCommand(op string, args ...string) ([]string, error) {
