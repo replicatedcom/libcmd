@@ -2,7 +2,8 @@ FROM ubuntu:trusty
 
 # Install.
 RUN apt-get update && apt-get install -y \
-    openssl
+    openssl \
+    curl
 
 ADD ./root/commands /root/commands
 
