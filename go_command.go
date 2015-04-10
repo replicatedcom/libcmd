@@ -3,6 +3,7 @@ package libcmd
 import (
 	"encoding/base64"
 	"errors"
+	log "github.com/Sirupsen/logrus"
 	"io/ioutil"
 	"math/rand"
 	"net"
@@ -85,10 +86,7 @@ func (c *goEchoCommand) Run(args ...string) ([]string, error) {
 	return []string{result}, nil
 }
 
-type goPublicIpCommand struct {
-	done   chan string
-	errors chan int
-}
+type goPublicIpCommand struct{}
 
 func (c *goPublicIpCommand) Run(args ...string) ([]string, error) {
 	urls := []string{
@@ -97,27 +95,27 @@ func (c *goPublicIpCommand) Run(args ...string) ([]string, error) {
 		"http://whatismyip.akamai.com",
 	}
 
-	c.done = make(chan string)
-	c.errors = make(chan int, len(urls))
+	done := make(chan string, len(urls))
+	errs := make(chan bool, len(urls))
 	for _, url := range urls {
 		go func(url string) {
 			resp, err := http.Get(url)
 			if err != nil {
-				c.errors <- 1
+				errs <- true
 				return
 			}
 
 			body, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
-				c.errors <- 1
+				errs <- true
 				return
 			}
 
 			ipStr := strings.TrimSpace(string(body))
 			if ip := net.ParseIP(ipStr); ip != nil {
-				c.done <- ipStr
+				done <- ipStr
 			} else {
-				c.errors <- 1
+				errs <- true
 			}
 		}(url)
 	}
@@ -125,9 +123,9 @@ func (c *goPublicIpCommand) Run(args ...string) ([]string, error) {
 	errCount := 0
 	for {
 		select {
-		case result := <-c.done:
+		case result := <-done:
 			return []string{result}, nil
-		case <-c.errors:
+		case <-errs:
 			errCount = errCount + 1
 			if errCount == len(urls) {
 				return nil, errors.New("Error contacting publicip servers")
