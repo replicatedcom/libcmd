@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"math/rand"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -86,7 +87,7 @@ func (c *goEchoCommand) Run(args ...string) ([]string, error) {
 
 type goPublicIpCommand struct {
 	done   chan string
-	errors chan error
+	errors chan int
 }
 
 func (c *goPublicIpCommand) Run(args ...string) ([]string, error) {
@@ -97,21 +98,27 @@ func (c *goPublicIpCommand) Run(args ...string) ([]string, error) {
 	}
 
 	c.done = make(chan string)
-	c.errors = make(chan error, len(urls))
+	c.errors = make(chan int, len(urls))
 	for _, url := range urls {
 		go func(url string) {
 			resp, err := http.Get(url)
 			if err != nil {
-				c.errors <- err
+				c.errors <- 1
 				return
 			}
 
 			body, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
-				c.errors <- err
+				c.errors <- 1
 				return
 			}
-			c.done <- string(body)
+
+			ipStr := strings.TrimSpace(string(body))
+			if ip := net.ParseIP(ipStr); ip != nil {
+				c.done <- ipStr
+			} else {
+				c.errors <- 1
+			}
 		}(url)
 	}
 
