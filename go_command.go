@@ -2,7 +2,10 @@ package libcmd
 
 import (
 	"encoding/base64"
+	"errors"
+	"io/ioutil"
 	"math/rand"
+	"net/http"
 	"strconv"
 	"strings"
 )
@@ -22,7 +25,10 @@ func newGoCommand(op string) (goCommand, error) {
 		return &goRandCommand{}, nil
 	} else if op == "echo" {
 		return &goEchoCommand{}, nil
+	} else if op == "publicip" {
+		return &goPublicIpCommand{}, nil
 	}
+
 	return nil, ErrCommandNotFound
 }
 
@@ -76,4 +82,49 @@ type goEchoCommand struct {
 func (c *goEchoCommand) Run(args ...string) ([]string, error) {
 	result := strings.Join(args, " ")
 	return []string{result}, nil
+}
+
+type goPublicIpCommand struct {
+	done   chan string
+	errors chan error
+}
+
+func (c *goPublicIpCommand) Run(args ...string) ([]string, error) {
+	urls := []string{
+		"http://ipecho.net/plain",
+		"http://ip.appspot.com",
+		"http://whatismyip.akamai.com",
+	}
+
+	c.done = make(chan string)
+	c.errors = make(chan error, len(urls))
+	for _, url := range urls {
+		go func(url string) {
+			resp, err := http.Get(url)
+			if err != nil {
+				c.errors <- err
+				return
+			}
+
+			body, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				c.errors <- err
+				return
+			}
+			c.done <- string(body)
+		}(url)
+	}
+
+	errCount := 0
+	for {
+		select {
+		case result := <-c.done:
+			return []string{result}, nil
+		case <-c.errors:
+			errCount = errCount + 1
+			if errCount == len(urls) {
+				return nil, errors.New("Error contacting publicip servers")
+			}
+		}
+	}
 }
