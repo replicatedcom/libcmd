@@ -51,10 +51,8 @@ func InitCmdContainer(opts map[string]string) {
 }
 
 func RunCommand(op string, args ...string) ([]string, error) {
-	goCmd, err := newGoCommand(op)
-	if err == nil {
-		result, err := goCmd.Run(args...)
-		return result, err
+	if goCmd, ok := goCommands[op]; ok {
+		return goCmd(args...)
 	}
 
 	containerCmd, err := newContainerCmd(op)
