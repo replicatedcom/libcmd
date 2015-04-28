@@ -3,7 +3,7 @@ package libcmd
 import (
 	"encoding/base64"
 	"errors"
-	log "github.com/Sirupsen/logrus"
+	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"net"
@@ -12,32 +12,21 @@ import (
 	"strings"
 )
 
+type goCommandFunc func(args ...string) ([]string, error)
+
 var (
 	randCharset = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-0123456789")
+
+	goCommands map[string]goCommandFunc = map[string]goCommandFunc{
+		"cert":            certCommand,
+		"random":          randomCommand,
+		"echo":            echoCommand,
+		"publicip":        publicIpCommand,
+		"github_app_auth": githubAppAuthCommand,
+	}
 )
 
-type goCommand interface {
-	Run(args ...string) ([]string, error)
-}
-
-func newGoCommand(op string) (goCommand, error) {
-	if op == "cert" {
-		return &goCertCommand{}, nil
-	} else if op == "random" {
-		return &goRandCommand{}, nil
-	} else if op == "echo" {
-		return &goEchoCommand{}, nil
-	} else if op == "publicip" {
-		return &goPublicIpCommand{}, nil
-	}
-
-	return nil, ErrCommandNotFound
-}
-
-type goCertCommand struct {
-}
-
-func (c *goCertCommand) Run(args ...string) ([]string, error) {
+func certCommand(args ...string) ([]string, error) {
 	cmd, err := newContainerCmd("cert")
 	if err != nil {
 		return nil, err
@@ -54,10 +43,7 @@ func (c *goCertCommand) Run(args ...string) ([]string, error) {
 	return results, nil
 }
 
-type goRandCommand struct {
-}
-
-func (c *goRandCommand) Run(args ...string) ([]string, error) {
+func randomCommand(args ...string) ([]string, error) {
 	length := 16
 	if len(args) > 0 {
 		var err error
@@ -78,17 +64,12 @@ func randSeq(length int) string {
 	return string(b)
 }
 
-type goEchoCommand struct {
-}
-
-func (c *goEchoCommand) Run(args ...string) ([]string, error) {
+func echoCommand(args ...string) ([]string, error) {
 	result := strings.Join(args, " ")
 	return []string{result}, nil
 }
 
-type goPublicIpCommand struct{}
-
-func (c *goPublicIpCommand) Run(args ...string) ([]string, error) {
+func publicIpCommand(args ...string) ([]string, error) {
 	urls := []string{
 		"http://ipecho.net/plain",
 		"http://ip.appspot.com",
@@ -132,4 +113,35 @@ func (c *goPublicIpCommand) Run(args ...string) ([]string, error) {
 			}
 		}
 	}
+}
+
+func githubAppAuthCommand(args ...string) ([]string, error) {
+	// Should be:
+	// 0: access type: http or https
+	// 1: endpoint, e.g.: api.github.com, or github.replicated.com/api/v3
+	// 2: key
+	// 3: secret
+	if len(args) < 4 {
+		return nil, fmt.Errorf("Missing required args")
+	}
+
+	endpoint := strings.TrimSuffix(args[1], "/")
+	testUrl := fmt.Sprintf("%v://%v/applications/%v/tokens/notatoken", args[0], endpoint, args[2])
+	req, err := http.NewRequest("GET", testUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(args[2], args[3])
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		// Yes, 404 means it's working.
+		return []string{"access_granted", "404"}, nil
+	}
+
+	return []string{"access_denied", fmt.Sprintf("%v", resp.StatusCode)}, nil
 }
