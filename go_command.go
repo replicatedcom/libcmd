@@ -117,21 +117,38 @@ func publicIpCommand(args ...string) ([]string, error) {
 
 func githubAppAuthCommand(args ...string) ([]string, error) {
 	// Should be:
-	// 0: access type: http or https
-	// 1: endpoint, e.g.: api.github.com, or github.replicated.com/api/v3
-	// 2: key
-	// 3: secret
-	if len(args) < 4 {
+	// 0: github_type: "github_type_public" or "github_type_enterprise"
+	// 1: github_enterprise_host: "github.replicated.com/api/v3"
+	// 2: github_enterprise_protocol: "github_enterprise_protocol_http" or "github_enterprise_protocol_https"
+	// 3: github_client_id
+	// 4: github_client_secret
+	if len(args) < 5 {
 		return nil, fmt.Errorf("Missing required args")
 	}
+	githubType := args[0]
+	githubEnterpriseHost := args[1]
+	githubEnterpriseProtocol := args[2]
+	githubClientId := args[3]
+	githubClientSecret := args[4]
 
-	endpoint := strings.TrimSuffix(args[1], "/")
-	testUrl := fmt.Sprintf("%v://%v/applications/%v/tokens/notatoken", args[0], endpoint, args[2])
+	var protocol, endpoint string
+	switch githubType {
+	case "github_type_public":
+		protocol = "https"
+		endpoint = "api.github.com"
+	case "github_type_enterprise":
+		protocol = strings.Split(githubEnterpriseProtocol, "_")[3]
+		endpoint = strings.TrimSuffix(githubEnterpriseHost, "/")
+	default:
+		return nil, fmt.Errorf("Unknown github type: %v", githubType)
+	}
+
+	testUrl := fmt.Sprintf("%v://%v/applications/%v/tokens/notatoken", protocol, endpoint)
 	req, err := http.NewRequest("GET", testUrl, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.SetBasicAuth(args[2], args[3])
+	req.SetBasicAuth(githubClientId, githubClientSecret)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
