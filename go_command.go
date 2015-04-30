@@ -140,12 +140,12 @@ func githubAppAuthCommand(args ...string) ([]string, error) {
 	case "github_type_enterprise":
 		protocol = strings.Split(githubEnterpriseProtocol, "_")[3]
 		cleanedHost := strings.Split(githubEnterpriseHost, "/")[0]
-		endpoint = fmt.Sprintf("%v/api/v3", cleanedHost)
+		endpoint = fmt.Sprintf("%s/api/v3", cleanedHost)
 	default:
-		return nil, fmt.Errorf("Unknown github type: %v", githubType)
+		return nil, fmt.Errorf("Unknown github type: %s", githubType)
 	}
 
-	testUrl := fmt.Sprintf("%v://%v/applications/%v/tokens/notatoken", protocol, endpoint, githubClientId)
+	testUrl := fmt.Sprintf("%s://%s/applications/%s/tokens/notatoken", protocol, endpoint, githubClientId)
 	req, err := http.NewRequest("GET", testUrl, nil)
 	if err != nil {
 		return nil, err
