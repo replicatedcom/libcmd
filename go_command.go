@@ -23,6 +23,7 @@ var (
 		"echo":            echoCommand,
 		"publicip":        publicIpCommand,
 		"github_app_auth": githubAppAuthCommand,
+		"resolve_host":    resolveHostCommand,
 	}
 )
 
@@ -118,7 +119,7 @@ func publicIpCommand(args ...string) ([]string, error) {
 func githubAppAuthCommand(args ...string) ([]string, error) {
 	// Should be:
 	// 0: github_type: "github_type_public" or "github_type_enterprise"
-	// 1: github_enterprise_host: "github.replicated.com/api/v3"
+	// 1: github_enterprise_host: "github.replicated.com"
 	// 2: github_enterprise_protocol: "github_enterprise_protocol_http" or "github_enterprise_protocol_https"
 	// 3: github_client_id
 	// 4: github_client_secret
@@ -138,12 +139,13 @@ func githubAppAuthCommand(args ...string) ([]string, error) {
 		endpoint = "api.github.com"
 	case "github_type_enterprise":
 		protocol = strings.Split(githubEnterpriseProtocol, "_")[3]
-		endpoint = strings.TrimSuffix(githubEnterpriseHost, "/")
+		cleanedHost := strings.Split(githubEnterpriseHost, "/")[0]
+		endpoint = fmt.Sprintf("%v/api/v3", cleanedHost)
 	default:
 		return nil, fmt.Errorf("Unknown github type: %v", githubType)
 	}
 
-	testUrl := fmt.Sprintf("%v://%v/applications/%v/tokens/notatoken", protocol, endpoint)
+	testUrl := fmt.Sprintf("%v://%v/applications/%v/tokens/notatoken", protocol, endpoint, githubClientId)
 	req, err := http.NewRequest("GET", testUrl, nil)
 	if err != nil {
 		return nil, err
@@ -157,8 +159,30 @@ func githubAppAuthCommand(args ...string) ([]string, error) {
 
 	if resp.StatusCode == 404 {
 		// Yes, 404 means it's working.
-		return []string{"access_granted", "404"}, nil
+		return []string{"true", "Access granted."}, nil
 	}
 
-	return []string{"access_denied", fmt.Sprintf("%v", resp.StatusCode)}, nil
+	return []string{"false", "Access denied."}, nil
+}
+
+func resolveHostCommand(args ...string) ([]string, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("Missing a hostname to resolve")
+	}
+	hostname := args[0]
+
+	a, err := net.LookupHost(hostname)
+	if err != nil {
+		if strings.HasSuffix(err.Error(), "no such host") {
+			return []string{"false", "Hostname could not be resolved."}, nil
+		}
+
+		return nil, err
+	}
+
+	if len(a) > 0 {
+		return []string{"true", "Hostname was resolved successfully."}, nil
+	}
+
+	return []string{"false", "Hostname could not be resolved."}, nil
 }
