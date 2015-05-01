@@ -18,12 +18,14 @@ var (
 	randCharset = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-0123456789")
 
 	goCommands map[string]goCommandFunc = map[string]goCommandFunc{
-		"cert":            certCommand,
-		"random":          randomCommand,
-		"echo":            echoCommand,
-		"publicip":        publicIpCommand,
-		"github_app_auth": githubAppAuthCommand,
-		"resolve_host":    resolveHostCommand,
+		"cert":             certCommand,
+		"random":           randomCommand,
+		"echo":             echoCommand,
+		"publicip":         publicIpCommand,
+		"github_app_auth":  githubAppAuthCommand,
+		"resolve_host":     resolveHostCommand,
+		"tcp_port_accept":  tcpPortAccept,
+		"http_status_code": httpStatusCode,
 	}
 )
 
@@ -185,4 +187,34 @@ func resolveHostCommand(args ...string) ([]string, error) {
 	}
 
 	return []string{"false", "Hostname could not be resolved."}, nil
+}
+
+func tcpPortAccept(args ...string) ([]string, error) {
+	_, err := net.Dial("tcp", fmt.Sprintf("%s:%s", args[0], args[1]))
+	if err != nil {
+		return []string{strconv.FormatBool(false)}, nil
+	}
+
+	return []string{strconv.FormatBool(true)}, nil
+}
+
+func httpStatusCode(args ...string) ([]string, error) {
+	req, err := http.NewRequest("GET", args[0], nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	expectedResponse, err := strconv.Atoi(args[1])
+	if err != nil {
+		return nil, err
+	}
+
+	result := expectedResponse == resp.StatusCode
+
+	return []string{strconv.FormatBool(result)}, nil
 }
