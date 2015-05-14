@@ -10,9 +10,21 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/awslabs/aws-sdk-go/aws"
+	"github.com/awslabs/aws-sdk-go/aws/credentials"
+	"github.com/awslabs/aws-sdk-go/service/ec2"
+	"github.com/awslabs/aws-sdk-go/service/s3"
+	"github.com/awslabs/aws-sdk-go/service/sqs"
 )
 
 type goCommandFunc func(args ...string) ([]string, error)
+
+const (
+	AWSServiceEC2 = "ec2"
+	AWSServiceS3  = "s3"
+	AWSServiceSQS = "sqs"
+)
 
 var (
 	randCharset = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-0123456789")
@@ -23,6 +35,7 @@ var (
 		"echo":             echoCommand,
 		"publicip":         publicIpCommand,
 		"github_app_auth":  githubAppAuthCommand,
+		"aws_auth":         awsAuthCommand,
 		"resolve_host":     resolveHostCommand,
 		"tcp_port_accept":  tcpPortAccept,
 		"http_status_code": httpStatusCode,
@@ -165,6 +178,52 @@ func githubAppAuthCommand(args ...string) ([]string, error) {
 	}
 
 	return []string{"false", "Access denied."}, nil
+}
+
+func awsAuthCommand(args ...string) ([]string, error) {
+	// Should be:
+	// 0: aws_access_key_id
+	// 1: aws_secret_access_key
+	// 2: aws_service
+	if len(args) < 3 {
+		return nil, fmt.Errorf("Missing required args")
+	}
+	awsAccessKeyID := args[0]
+	awsSecretAccessKey := args[1]
+	awsService := args[2]
+
+	creds := credentials.NewStaticCredentials(awsAccessKeyID, awsSecretAccessKey, "")
+	config := &aws.Config{
+		Region:      "us-east-1",
+		Credentials: creds,
+	}
+
+	var err error
+
+	switch awsService {
+	case AWSServiceEC2:
+		svc := ec2.New(config)
+		_, err = svc.DescribeRegions(nil)
+
+	case AWSServiceS3:
+		svc := s3.New(config)
+		_, err = svc.ListBuckets(nil)
+
+	case AWSServiceSQS:
+		svc := sqs.New(config)
+		_, err = svc.ListQueues(nil)
+
+	default:
+		return nil, errors.New("AWS service must be one of \"ec2\", \"s3\" or \"sqs\"")
+	}
+
+	if awserr := aws.Error(err); awserr != nil {
+		return []string{"false", "Access denied."}, nil
+	} else if err != nil {
+		return nil, err
+	}
+
+	return []string{"true", "Access granted."}, nil
 }
 
 func resolveHostCommand(args ...string) ([]string, error) {
