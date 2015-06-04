@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/replicatedcom/libcmd"
+	"github.com/replicatedcom/libcmd/command"
+
+	log "github.com/Sirupsen/logrus"
 )
 
 var (
@@ -26,9 +28,14 @@ func main() {
 	libcmd.InitCmdContainer(opts)
 
 	log.Infof("Running command \"%s\"", op)
+
 	results, err := libcmd.RunCommand(op, flag.Args()...)
-	if err != nil {
+
+	if err == command.ErrCommandResponse {
+		log.Errorf("Command error: %q", results)
+	} else if err != nil {
 		log.Fatal(err)
+	} else {
+		log.Infof("Command result: %q", results)
 	}
-	log.Infof("Command result: %q", results)
 }

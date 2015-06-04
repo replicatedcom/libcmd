@@ -1,18 +1,17 @@
 package libcmd
 
 import (
-	"errors"
 	"reflect"
+
+	"github.com/replicatedcom/libcmd/command"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/fsouza/go-dockerclient"
 )
 
 var (
-	ErrCommandNotFound = errors.New("command not found")
-
 	globalDockerClient *docker.Client
-	config             cmdConfig
+	config             command.CmdConfig
 
 	cmdConfigDefaultOpts = map[string]string{
 		"CommandsDir":         "/root/commands",
@@ -22,15 +21,8 @@ var (
 	}
 )
 
-type cmdConfig struct {
-	CommandsDir         string
-	DockerEndpoint      string
-	ContainerRepository string
-	ContainerTag        string
-}
-
 func InitCmdContainer(opts map[string]string) {
-	config = cmdConfig{}
+	config = command.CmdConfig{}
 	for key, dflt := range cmdConfigDefaultOpts {
 		field := reflect.ValueOf(&config).Elem().FieldByName(key)
 		if value, ok := opts[key]; ok {
@@ -45,23 +37,23 @@ func InitCmdContainer(opts map[string]string) {
 		log.Fatal(err)
 	}
 	globalDockerClient = client
-	if err := pullImage(globalDockerClient, config.ContainerRepository, config.ContainerTag); err != nil {
+	if err := command.PullImage(globalDockerClient, config.ContainerRepository, config.ContainerTag); err != nil {
 		log.Fatal(err)
 	}
 }
 
 func RunCommand(op string, args ...string) ([]string, error) {
-	if goCmd, ok := goCommands[op]; ok {
-		return goCmd(args...)
+	goCmd, err := command.NewGoCmd(op, config, globalDockerClient)
+	if err == nil {
+		return goCmd.Run(args...)
+	}
+	if err != command.ErrCommandNotFound {
+		return nil, err
 	}
 
-	containerCmd, err := newContainerCmd(op)
-	if err != nil {
-		return nil, err
+	containerCmd, err := command.NewContainerCmd(op, config, globalDockerClient)
+	if err == nil {
+		return containerCmd.Run(args...)
 	}
-	result, err := containerCmd.Run(args...)
-	if err != nil {
-		return nil, err
-	}
-	return []string{result}, nil
+	return nil, err
 }
