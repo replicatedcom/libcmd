@@ -1,4 +1,4 @@
-package libcmd
+package command
 
 import (
 	"encoding/base64"
@@ -16,9 +16,10 @@ import (
 	"github.com/awslabs/aws-sdk-go/service/ec2"
 	"github.com/awslabs/aws-sdk-go/service/s3"
 	"github.com/awslabs/aws-sdk-go/service/sqs"
+	"github.com/fsouza/go-dockerclient"
 )
 
-type goCommandFunc func(args ...string) ([]string, error)
+type goCommandFunc func(c *goCmd, args ...string) ([]string, error)
 
 const (
 	AWSServiceEC2 = "ec2"
@@ -42,8 +43,26 @@ var (
 	}
 )
 
-func certCommand(args ...string) ([]string, error) {
-	cmd, err := newContainerCmd("cert")
+type goCmd struct {
+	fn           goCommandFunc
+	config       CmdConfig
+	dockerClient *docker.Client
+}
+
+func (c *goCmd) Run(args ...string) ([]string, error) {
+	return c.fn(c, args...)
+}
+
+func NewGoCmd(op string, config CmdConfig, dockerClient *docker.Client) (*goCmd, error) {
+	fn, exists := goCommands[op]
+	if !exists {
+		return nil, ErrCommandNotFound
+	}
+	return &goCmd{fn, config, dockerClient}, nil
+}
+
+func certCommand(c *goCmd, args ...string) ([]string, error) {
+	cmd, err := NewContainerCmd("cert", c.config, c.dockerClient)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +70,7 @@ func certCommand(args ...string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	results := strings.SplitAfter(result, "-----END RSA PRIVATE KEY-----")
+	results := strings.SplitAfter(result[0], "-----END RSA PRIVATE KEY-----")
 	for i, result := range results {
 		result := strings.TrimSpace(result)
 		results[i] = base64.StdEncoding.EncodeToString([]byte(result))
@@ -59,7 +78,7 @@ func certCommand(args ...string) ([]string, error) {
 	return results, nil
 }
 
-func randomCommand(args ...string) ([]string, error) {
+func randomCommand(c *goCmd, args ...string) ([]string, error) {
 	length := 16
 	if len(args) > 0 {
 		var err error
@@ -80,12 +99,12 @@ func randSeq(length int) string {
 	return string(b)
 }
 
-func echoCommand(args ...string) ([]string, error) {
+func echoCommand(c *goCmd, args ...string) ([]string, error) {
 	result := strings.Join(args, " ")
 	return []string{result}, nil
 }
 
-func publicIpCommand(args ...string) ([]string, error) {
+func publicIpCommand(c *goCmd, args ...string) ([]string, error) {
 	urls := []string{
 		"http://ipecho.net/plain",
 		"http://ip.appspot.com",
@@ -131,7 +150,7 @@ func publicIpCommand(args ...string) ([]string, error) {
 	}
 }
 
-func githubAppAuthCommand(args ...string) ([]string, error) {
+func githubAppAuthCommand(c *goCmd, args ...string) ([]string, error) {
 	// Should be:
 	// 0: github_type: "github_type_public" or "github_type_enterprise"
 	// 1: github_enterprise_host: "github.replicated.com"
@@ -180,7 +199,7 @@ func githubAppAuthCommand(args ...string) ([]string, error) {
 	return []string{"false", "Access denied."}, nil
 }
 
-func awsAuthCommand(args ...string) ([]string, error) {
+func awsAuthCommand(c *goCmd, args ...string) ([]string, error) {
 	// Should be:
 	// 0: aws_access_key_id
 	// 1: aws_secret_access_key
@@ -226,7 +245,7 @@ func awsAuthCommand(args ...string) ([]string, error) {
 	return []string{"true", "Access granted."}, nil
 }
 
-func resolveHostCommand(args ...string) ([]string, error) {
+func resolveHostCommand(c *goCmd, args ...string) ([]string, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("Missing a hostname to resolve")
 	}
@@ -248,7 +267,7 @@ func resolveHostCommand(args ...string) ([]string, error) {
 	return []string{"false", "Hostname could not be resolved."}, nil
 }
 
-func tcpPortAccept(args ...string) ([]string, error) {
+func tcpPortAccept(c *goCmd, args ...string) ([]string, error) {
 	_, err := net.Dial("tcp", fmt.Sprintf("%s:%s", args[0], args[1]))
 	if err != nil {
 		return []string{strconv.FormatBool(false)}, nil
@@ -257,7 +276,7 @@ func tcpPortAccept(args ...string) ([]string, error) {
 	return []string{strconv.FormatBool(true)}, nil
 }
 
-func httpStatusCode(args ...string) ([]string, error) {
+func httpStatusCode(c *goCmd, args ...string) ([]string, error) {
 	req, err := http.NewRequest("GET", args[0], nil)
 	if err != nil {
 		return nil, err

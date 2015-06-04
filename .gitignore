@@ -1,1 +1,4 @@
-vendor
+_vendor/
+bin/
+test-results/
+.DS_Store

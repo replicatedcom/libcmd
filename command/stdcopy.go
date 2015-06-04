@@ -1,4 +1,4 @@
-package libcmd
+package command
 
 import (
 	"encoding/binary"
