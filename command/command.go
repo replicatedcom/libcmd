@@ -6,8 +6,16 @@ import (
 
 var (
 	ErrCommandNotFound = errors.New("command not found")
-	ErrCommandResponse = errors.New("error running command")
+	ErrMissingArgs     = errors.New("Missing required arguments")
 )
+
+type ErrCommandResponse struct {
+	msg string
+}
+
+func (e ErrCommandResponse) Error() string {
+	return e.msg
+}
 
 type CmdConfig struct {
 	CommandsDir         string

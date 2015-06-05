@@ -31,11 +31,11 @@ func main() {
 
 	results, err := libcmd.RunCommand(op, flag.Args()...)
 
-	if err == command.ErrCommandResponse {
-		log.Errorf("Command error: %q", results)
-	} else if err != nil {
-		log.Fatal(err)
+	if _, ok := err.(command.ErrCommandResponse); ok {
+		log.Errorf("Command error:\nError: %v\nResults: %q", err, results)
+	} else if err == nil {
+		log.Infof("Command success\nResults: %q", results)
 	} else {
-		log.Infof("Command result: %q", results)
+		log.Fatal(err)
 	}
 }

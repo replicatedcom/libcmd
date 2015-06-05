@@ -2,6 +2,7 @@ package command
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -19,7 +20,7 @@ import (
 	"github.com/fsouza/go-dockerclient"
 )
 
-type goCommandFunc func(c *goCmd, args ...string) ([]string, error)
+type goCommandFunc func(c *GoCmd, args ...string) ([]string, error)
 
 const (
 	AWSServiceEC2 = "ec2"
@@ -30,11 +31,11 @@ const (
 var (
 	randCharset = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-0123456789")
 
-	goCommands map[string]goCommandFunc = map[string]goCommandFunc{
+	goCommands = map[string]goCommandFunc{
 		"cert":             certCommand,
 		"random":           randomCommand,
 		"echo":             echoCommand,
-		"publicip":         publicIpCommand,
+		"publicip":         publicIPCommand,
 		"github_app_auth":  githubAppAuthCommand,
 		"aws_auth":         awsAuthCommand,
 		"resolve_host":     resolveHostCommand,
@@ -43,32 +44,32 @@ var (
 	}
 )
 
-type goCmd struct {
-	fn           goCommandFunc
+type GoCmd struct {
+	Fn           goCommandFunc
 	config       CmdConfig
 	dockerClient *docker.Client
 }
 
-func (c *goCmd) Run(args ...string) ([]string, error) {
-	return c.fn(c, args...)
+func (c *GoCmd) Run(args ...string) ([]string, error) {
+	return c.Fn(c, args...)
 }
 
-func NewGoCmd(op string, config CmdConfig, dockerClient *docker.Client) (*goCmd, error) {
+func NewGoCmd(op string, config CmdConfig, dockerClient *docker.Client) (*GoCmd, error) {
 	fn, exists := goCommands[op]
 	if !exists {
 		return nil, ErrCommandNotFound
 	}
-	return &goCmd{fn, config, dockerClient}, nil
+	return &GoCmd{fn, config, dockerClient}, nil
 }
 
-func certCommand(c *goCmd, args ...string) ([]string, error) {
+func certCommand(c *GoCmd, args ...string) ([]string, error) {
 	cmd, err := NewContainerCmd("cert", c.config, c.dockerClient)
 	if err != nil {
 		return nil, err
 	}
 	result, err := cmd.Run(args...)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	results := strings.SplitAfter(result[0], "-----END RSA PRIVATE KEY-----")
 	for i, result := range results {
@@ -78,7 +79,7 @@ func certCommand(c *goCmd, args ...string) ([]string, error) {
 	return results, nil
 }
 
-func randomCommand(c *goCmd, args ...string) ([]string, error) {
+func randomCommand(c *GoCmd, args ...string) ([]string, error) {
 	length := 16
 	if len(args) > 0 {
 		var err error
@@ -99,12 +100,12 @@ func randSeq(length int) string {
 	return string(b)
 }
 
-func echoCommand(c *goCmd, args ...string) ([]string, error) {
+func echoCommand(c *GoCmd, args ...string) ([]string, error) {
 	result := strings.Join(args, " ")
 	return []string{result}, nil
 }
 
-func publicIpCommand(c *goCmd, args ...string) ([]string, error) {
+func publicIPCommand(c *GoCmd, args ...string) ([]string, error) {
 	urls := []string{
 		"http://ipecho.net/plain",
 		"http://ip.appspot.com",
@@ -142,15 +143,15 @@ func publicIpCommand(c *goCmd, args ...string) ([]string, error) {
 		case result := <-done:
 			return []string{result}, nil
 		case <-errs:
-			errCount = errCount + 1
+			errCount++
 			if errCount == len(urls) {
-				return nil, errors.New("Error contacting publicip servers")
+				return nil, errors.New("Error contacting publicip servers.")
 			}
 		}
 	}
 }
 
-func githubAppAuthCommand(c *goCmd, args ...string) ([]string, error) {
+func githubAppAuthCommand(c *GoCmd, args ...string) ([]string, error) {
 	// Should be:
 	// 0: github_type: "github_type_public" or "github_type_enterprise"
 	// 1: github_enterprise_host: "github.replicated.com"
@@ -158,12 +159,12 @@ func githubAppAuthCommand(c *goCmd, args ...string) ([]string, error) {
 	// 3: github_client_id
 	// 4: github_client_secret
 	if len(args) < 5 {
-		return nil, fmt.Errorf("Missing required args")
+		return nil, ErrMissingArgs
 	}
 	githubType := args[0]
 	githubEnterpriseHost := args[1]
 	githubEnterpriseProtocol := args[2]
-	githubClientId := args[3]
+	githubClientID := args[3]
 	githubClientSecret := args[4]
 
 	var protocol, endpoint string
@@ -179,12 +180,12 @@ func githubAppAuthCommand(c *goCmd, args ...string) ([]string, error) {
 		return nil, fmt.Errorf("Unknown github type: %s", githubType)
 	}
 
-	testUrl := fmt.Sprintf("%s://%s/applications/%s/tokens/notatoken", protocol, endpoint, githubClientId)
-	req, err := http.NewRequest("GET", testUrl, nil)
+	testURL := fmt.Sprintf("%s://%s/applications/%s/tokens/notatoken", protocol, endpoint, githubClientID)
+	req, err := http.NewRequest("GET", testURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.SetBasicAuth(githubClientId, githubClientSecret)
+	req.SetBasicAuth(githubClientID, githubClientSecret)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -193,19 +194,30 @@ func githubAppAuthCommand(c *goCmd, args ...string) ([]string, error) {
 
 	if resp.StatusCode == 404 {
 		// Yes, 404 means it's working.
-		return []string{"true", "Access granted."}, nil
+		return []string{"true"}, nil
 	}
 
-	return []string{"false", "Access denied."}, nil
+	errMsg := "Github app authentication failed."
+
+	if body, err := ioutil.ReadAll(resp.Body); err == nil {
+		var data map[string]interface{}
+		if err := json.Unmarshal(body, &data); err == nil {
+			if msg, ok := data["message"]; ok {
+				errMsg = fmt.Sprintf("Github app authentication failed: %s", msg)
+			}
+		}
+	}
+
+	return []string{"false"}, ErrCommandResponse{errMsg}
 }
 
-func awsAuthCommand(c *goCmd, args ...string) ([]string, error) {
+func awsAuthCommand(c *GoCmd, args ...string) ([]string, error) {
 	// Should be:
 	// 0: aws_access_key_id
 	// 1: aws_secret_access_key
 	// 2: aws_service
 	if len(args) < 3 {
-		return nil, fmt.Errorf("Missing required args")
+		return nil, ErrMissingArgs
 	}
 	awsAccessKeyID := args[0]
 	awsSecretAccessKey := args[1]
@@ -237,46 +249,51 @@ func awsAuthCommand(c *goCmd, args ...string) ([]string, error) {
 	}
 
 	if awserr := aws.Error(err); awserr != nil {
-		return []string{"false", "Access denied."}, nil
+		errMsg := fmt.Sprintf("AWS authentication failed: %v", awserr)
+		return []string{"false"}, ErrCommandResponse{errMsg}
 	} else if err != nil {
 		return nil, err
 	}
 
-	return []string{"true", "Access granted."}, nil
+	return []string{"true"}, nil
 }
 
-func resolveHostCommand(c *goCmd, args ...string) ([]string, error) {
-	if len(args) == 0 {
-		return nil, fmt.Errorf("Missing a hostname to resolve")
+func resolveHostCommand(c *GoCmd, args ...string) ([]string, error) {
+	if len(args) < 1 {
+		return nil, ErrMissingArgs
 	}
+
 	hostname := args[0]
 
-	a, err := net.LookupHost(hostname)
+	addrs, err := net.LookupHost(hostname)
 	if err != nil {
-		if strings.HasSuffix(err.Error(), "no such host") {
-			return []string{"false", "Hostname could not be resolved."}, nil
-		}
-
-		return nil, err
+		errMsg := fmt.Sprintf("Error contacting host: %v", err)
+		return nil, ErrCommandResponse{errMsg}
 	}
 
-	if len(a) > 0 {
-		return []string{"true", "Hostname was resolved successfully."}, nil
+	if len(addrs) > 0 {
+		return addrs, nil
 	}
 
-	return []string{"false", "Hostname could not be resolved."}, nil
+	return nil, ErrCommandResponse{"Error contacting host"}
 }
 
-func tcpPortAccept(c *goCmd, args ...string) ([]string, error) {
-	_, err := net.Dial("tcp", fmt.Sprintf("%s:%s", args[0], args[1]))
-	if err != nil {
-		return []string{strconv.FormatBool(false)}, nil
+func tcpPortAccept(c *GoCmd, args ...string) ([]string, error) {
+	if len(args) < 2 {
+		return nil, ErrMissingArgs
 	}
 
-	return []string{strconv.FormatBool(true)}, nil
+	if _, err := net.Dial("tcp", fmt.Sprintf("%s:%s", args[0], args[1])); err != nil {
+		return []string{"false"}, ErrCommandResponse{err.Error()}
+	}
+	return []string{"true"}, nil
 }
 
-func httpStatusCode(c *goCmd, args ...string) ([]string, error) {
+func httpStatusCode(c *GoCmd, args ...string) ([]string, error) {
+	if len(args) < 1 {
+		return nil, ErrMissingArgs
+	}
+
 	req, err := http.NewRequest("GET", args[0], nil)
 	if err != nil {
 		return nil, err
@@ -287,12 +304,22 @@ func httpStatusCode(c *goCmd, args ...string) ([]string, error) {
 	}
 	defer resp.Body.Close()
 
-	expectedResponse, err := strconv.Atoi(args[1])
-	if err != nil {
-		return nil, err
+	actualStatus := strconv.Itoa(resp.StatusCode)
+
+	// TODO: i would like to deprecate the expected status version of this command
+	if len(args) >= 2 {
+		expectedStatus := args[1]
+		if _, err := strconv.Atoi(expectedStatus); err != nil {
+			return nil, err
+		}
+
+		if actualStatus != expectedStatus {
+			errMsg := fmt.Sprintf("HTTP status code %s", actualStatus)
+			return []string{"false"}, ErrCommandResponse{errMsg}
+		}
+
+		return []string{"true"}, nil
 	}
 
-	result := expectedResponse == resp.StatusCode
-
-	return []string{strconv.FormatBool(result)}, nil
+	return []string{actualStatus}, nil
 }
