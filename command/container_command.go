@@ -11,12 +11,15 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/fsouza/go-dockerclient"
 )
 
 var (
+	timeoutDuration = time.Second * 15
+
 	availableCommands = []string{
 		"cert",
 		"random",
@@ -24,13 +27,14 @@ var (
 	}
 )
 
-type containerCmd struct {
-	op           string
+type ContainerCmd struct {
+	Op           string
+	Timeout      bool
 	config       CmdConfig
 	dockerClient *docker.Client
 }
 
-func NewContainerCmd(op string, config CmdConfig, dockerClient *docker.Client) (*containerCmd, error) {
+func NewContainerCmd(op string, config CmdConfig, dockerClient *docker.Client) (*ContainerCmd, error) {
 	exists := false
 	for _, o := range availableCommands {
 		if o == op {
@@ -41,12 +45,16 @@ func NewContainerCmd(op string, config CmdConfig, dockerClient *docker.Client) (
 	if !exists {
 		return nil, ErrCommandNotFound
 	}
-	cmd := containerCmd{op, config, dockerClient}
+	cmd := ContainerCmd{
+		Op:           op,
+		config:       config,
+		dockerClient: dockerClient,
+	}
 	return &cmd, nil
 }
 
-func (c *containerCmd) Run(args ...string) ([]string, error) {
-	cmdParts := []string{"bash", fmt.Sprintf("%s/%s.sh", c.config.CommandsDir, c.op)}
+func (c *ContainerCmd) Run(args ...string) ([]string, error) {
+	cmdParts := []string{"bash", fmt.Sprintf("%s/%s.sh", c.config.CommandsDir, c.Op)}
 	cmdParts = append(cmdParts, args...)
 	container, err := createContainer(c.dockerClient, c.config.ContainerRepository, c.config.ContainerTag, cmdParts)
 	if err != nil {
@@ -58,23 +66,28 @@ func (c *containerCmd) Run(args ...string) ([]string, error) {
 		return nil, err
 	}
 
-	stopCh := make(chan bool)
-	eventCh, err := getContainerEventCh(c.dockerClient, container.ID, stopCh)
-	if err != nil {
-		return nil, err
-	}
+	exitCode := -1
+	exitCh := make(chan int)
 
-	for {
-		event := <-eventCh
-		if event.Status == "die" {
-			close(stopCh)
-			break
+	go func() {
+		for {
+			if c.Timeout {
+				return
+			}
+			state, err := getContainerState(c.dockerClient, container.ID)
+			if err == nil && !state.FinishedAt.IsZero() {
+				exitCh <- state.ExitCode
+				return
+			}
+			time.Sleep(time.Millisecond * 100)
 		}
-	}
+	}()
 
-	exitCode, err := getContainerExitCode(c.dockerClient, container.ID)
-	if err != nil {
-		return nil, err
+	select {
+	case <-time.After(timeoutDuration):
+		c.Timeout = true
+	case exitCode = <-exitCh:
+		break
 	}
 
 	stdout, stderr, err := getContainerLogs(c.config.DockerEndpoint, container.ID)
@@ -86,7 +99,8 @@ func (c *containerCmd) Run(args ...string) ([]string, error) {
 		return []string{strings.TrimSpace(stdout)}, nil
 	}
 
-	return []string{strings.TrimSpace(stderr)}, ErrCommandResponse
+	errMsg := fmt.Sprintf("Command exited with status %d", exitCode)
+	return []string{strings.TrimSpace(stderr)}, ErrCommandResponse{errMsg}
 }
 
 func PullImage(client *docker.Client, repository, tag string) error {
@@ -156,43 +170,15 @@ func removeContainer(client *docker.Client, containerID string) error {
 	return nil
 }
 
-func getContainerEventCh(client *docker.Client, containerID string, stopCh chan bool) (<-chan *docker.APIEvents, error) {
-	eventCh := make(chan *docker.APIEvents)
-
-	listener := make(chan *docker.APIEvents)
-	log.Debugf("adding container %s event listener", containerID)
-	if err := client.AddEventListener(listener); err != nil {
-		log.Errorf(" -> error adding container %s event listener: %s", containerID, err)
-		return nil, err
-	}
-	log.Debugf(" -> container %s event listener added successfully", containerID)
-
-	go func() {
-		for {
-			select {
-			case event := <-listener:
-				if event.ID == containerID {
-					eventCh <- event
-				}
-				continue
-			case <-stopCh:
-				return
-			}
-		}
-	}()
-
-	return eventCh, nil
-}
-
-func getContainerExitCode(client *docker.Client, containerID string) (int, error) {
+func getContainerState(client *docker.Client, containerID string) (*docker.State, error) {
 	log.Debugf("inspecting container %s", containerID)
 	cntr, err := client.InspectContainer(containerID)
 	if err != nil {
 		log.Errorf(" -> error inspecting container %s: %s", containerID, err)
-		return -1, err
+		return nil, err
 	}
 	log.Debugf(" -> container %s inspect success", containerID)
-	return cntr.State.ExitCode, nil
+	return &cntr.State, nil
 }
 
 func getContainerLogs(endpoint, containerID string) (string, string, error) {
