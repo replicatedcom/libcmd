@@ -1,6 +1,8 @@
 package libcmd
 
 import (
+	"net/http"
+	"net/url"
 	"reflect"
 
 	"github.com/replicatedcom/libcmd/command"
@@ -18,6 +20,7 @@ var (
 		"DockerEndpoint":      "unix:///var/run/docker.sock",
 		"ContainerRepository": "freighterio/cmd",
 		"ContainerTag":        "latest",
+		"HttpProxy":           "",
 	}
 )
 
@@ -36,6 +39,16 @@ func InitCmdContainer(opts map[string]string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	if config.HttpProxy != "" {
+		p := config.HttpProxy
+		client.HTTPClient.Transport = &http.Transport{
+			Proxy: func(*http.Request) (*url.URL, error) {
+				return url.Parse(p)
+			},
+		}
+	}
+
 	globalDockerClient = client
 	if err := command.PullImage(globalDockerClient, config.ContainerRepository, config.ContainerTag); err != nil {
 		log.Fatal(err)
