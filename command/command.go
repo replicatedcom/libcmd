@@ -22,5 +22,4 @@ type CmdConfig struct {
 	DockerEndpoint      string
 	ContainerRepository string
 	ContainerTag        string
-	HttpProxy           string
 }
